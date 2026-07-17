@@ -129,6 +129,60 @@ queries). Make sure real-time control still stops on SUSPEND.
 **Build it in the fresh chat** (CubeMX gives the real HAL_GetTick environment);
 this is designed but not yet written.
 
+## Module architecture — base class / template (SETTLED DIRECTION)
+
+Decision: **yes, each hardware module becomes a class, and a lean `Module` base
+class defines the lifecycle contract.** But the base is an *interface*, not a
+framework — its value is enforcing a uniform contract and centralizing lifecycle,
+NOT sharing implementation code.
+
+**Why classes (vs. today's .cpp-of-globals + free functions):**
+- Encapsulate per-module state — kills the `esi/esich/esidata` triple-bookkeeping
+  disease (see MIPS TODO) that module-as-bag-of-globals breeds.
+- Natural owner of the module's GAACE CommandList (`Module::registerCommands(cp)`)
+  — the seam for Serial.cpp decomposition.
+- Clean instance-per-detected-board, enabling the dynamic per-module allocation
+  the TODO wants (vs. today's static arrays).
+
+**The base class (lean, near-pure-virtual):**
+```cpp
+class Module {
+public:
+  virtual void begin() = 0;                              // hw init, detect board
+  virtual void registerCommands(commandProcessor&) = 0;  // add my command table
+  virtual void loop() = 0;                               // scheduler task body
+  virtual bool saveConfig() = 0;                         // FlashFS
+  virtual bool loadConfig() = 0;
+  const char* name() const;
+  // maybe: bool present(); uint8_t boardAddr();
+};
+```
+Gives a **registry pattern**: `Module* modules[]`; boot = "for each detected
+module: begin(); registerCommands(cp); scheduler.addTask(name, ()->loop(), interval)."
+Replaces the 41 scattered `control.add(&XThread)` + init calls with ONE uniform
+loop. The module's `loop()` is exactly what the new scheduler's addTask registers;
+its `registerCommands()` is exactly the Serial.cpp-decomposition seam.
+
+**Guardrails (do NOT over-engineer):**
+- **No deep inheritance.** Resist `Module→AnalogModule→DCBiasLike→DCbias`. The
+  modules (DCbias, RF, FAIMS, ARB, Twave) are genuinely heterogeneous; a deep
+  hierarchy to share a few lines creates fragile cross-coupling. ONE shallow base
+  + **composition**: shared mechanism (DeferredQueue, FlashFS, config-blob helper)
+  are members/utilities modules USE, not superclasses.
+- **Interface, not framework.** Keep it near-pure-virtual. Real behavior that
+  subclasses must override-around is the smell.
+- **Embedded C++ discipline:** no RTTI, no exceptions. Virtual dispatch for
+  once-per-loop module ticks is fine (negligible). Keep virtuals OUT of the
+  pulse-timer hot path (those stay direct/free-function calls).
+
+**⚠ Design the base class by DISCOVERY, not up front.** Do NOT fully design the
+abstract base in a vacuum — you'll guess wrong about what belongs in it. Sequence:
+1. Draft the minimal `Module` interface (the ~6 virtuals above).
+2. Migrate **DCbias** onto it concretely (Phase 5).
+3. Refactor the base based on what DCbias actually needed — now it's proven.
+4. That validated base + DCbias become the template modules 6–41 follow.
+This is the real reason DCbias-as-template (Phase 5) is the linchpin.
+
 ## Immediate next action
 
 **Run CubeMX**, generate into `cubemx/`, following `TODO.md` Phase 0 and

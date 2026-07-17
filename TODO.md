@@ -74,7 +74,13 @@ Run CubeMX and generate into `cubemx/`. Use
 
 ## Phase 5+ — Module migration (DCbias template first)
 
-- [ ] Migrate DCbias end-to-end onto the core as the reference template.
+- [ ] Draft the minimal `Module` base class (begin / registerCommands / loop /
+      saveConfig / loadConfig — see CLAUDE_HANDOFF.md "Module architecture").
+- [ ] Migrate DCbias end-to-end onto the core AND the Module base, as the
+      reference template. Then refactor the base class based on what DCbias
+      actually needed (discover the contract, don't design it in a vacuum).
+- [ ] Set up the module registry (Module* modules[]) + uniform boot loop
+      (begin / registerCommands / scheduler.addTask(loop)).
 - [ ] Then DC/analog family, RF family, timing-critical family, remaining modules
       (firmware plan §8–9). Decompose Serial.cpp into per-module tables as you go.
 
