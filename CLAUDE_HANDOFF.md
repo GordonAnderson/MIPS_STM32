@@ -67,6 +67,68 @@ In the `GAACE_Core` repo, branch **`stm32`** (already pushed to GitHub):
   `SerialBuffer`, `WireServer`. `AtomicBlock` (Cortex-M generic) and `Errors`
   (pure enum) need no changes.
 
+## Cooperative scheduler — SETTLED DESIGN (build fresh, do not port ArduinoThread)
+
+Decision: write a **fresh minimal cooperative scheduler**, not port ArduinoThread.
+Rationale: MIPS's task-management commands are genuinely useful and must be kept,
+and integrating them with the scheduler (as a first-class feature, using the
+GAACE command processor) is cleaner than MIPS's current approach (dumb scheduler
++ scattered free-functions in Serial.cpp). This becomes the first example of a
+module owning its own command table — directly serving the Serial.cpp
+decomposition goal. Aim: a clean solution that could replace ArduinoThread.
+
+**Granularity:** millisecond only (via HAL_GetTick()). No sub-ms — the real-time-
+critical work lives in hardware timers (STM32PulseTimer), not the scheduler.
+
+**What MIPS does today (the behavior to preserve):** every module does
+`thread.onRun(cb); thread.setInterval(100); control.add(&thread);` at init, and
+the main loop runs `if (!Suspend) control.run();`. Threads are added once at boot,
+never removed — only enabled/disabled. Task-management commands (THREADS / THREAD
+/ STHRDENA / STHRDINT / RUNNOW / THRDRESTART / SSPND) let you inspect and control
+the running scheduler over serial. THRDRESTART staggers restarts by 25ms×index.
+
+**New scheduler — per-task metadata:**
+- name, ID (assigned at add — centralize this, don't leave it ordering-implicit),
+  interval (ms), enabled, callback
+- last runtime, **max runtime**, **run count** (all three kept/added — cheap and
+  diagnostic; runtime is explicitly required)
+- **overrun flag** when a task's runtime exceeds its own interval (the single most
+  useful health signal in a cooperative system — a task running longer than its
+  period is starving the loop)
+
+**New scheduler — API:**
+- `addTask(name, callback, intervalMs)` → returns handle/ID (replaces the clunky
+  3-line onRun/setInterval/add dance)
+- `run()` — called from the main loop; runs due tasks, measures runtime
+- `suspendAll(bool)` — **the scheduler OWNS suspend** (first-class), not an
+  external main-loop flag. SUSPEND becomes a command in the scheduler's own table.
+- `registerCommandTable(commandProcessor&)` — scheduler registers its OWN GAACE
+  CommandList; the task-management commands travel with the scheduler as one unit
+
+**Commands (scheduler owns this GAACE table):** TASKS (list: name,ID,interval,
+enabled,last runtime,max runtime,count), TASK <name> (details), TASKENA <name>,<T/F>,
+TASKINT <name>,<ms> (1–10000), RUNNOW <name>, RESTART (staggered 25ms×index),
+SUSPEND <T/F>. (Names are suggestions; keep the MIPS command spellings if host-
+compat matters — confirm with Gordon.)
+
+**Missed-deadline policy (make explicit):** run-once-and-reschedule-from-now
+(drift-tolerant), NOT catch-up/fixed-rate. Avoids a spiral-of-death if the loop
+stalls. This is effectively what MIPS does via setNextRunTime(millis()+interval).
+
+**Deliberately OUT of scope:** priorities (cooperative has no real priorities —
+would imply preemption we don't have), dynamic task deletion (tasks live for the
+program; enable/disable is enough), sub-ms intervals.
+
+**⚠ Suspend subtlety (do not lose):** in MIPS, `Suspend` also gates *table-mode
+real-time control*, not just the cooperative threads (Table.cpp / pulse engine).
+Since suspend now lives IN the scheduler, the table/pulse engine still needs to
+honor suspend — it is NOT a cooperative task, so it must check the scheduler's
+suspend state (or the scheduler exposes an `isSuspended()` the pulse/table code
+queries). Make sure real-time control still stops on SUSPEND.
+
+**Build it in the fresh chat** (CubeMX gives the real HAL_GetTick environment);
+this is designed but not yet written.
+
 ## Immediate next action
 
 **Run CubeMX**, generate into `cubemx/`, following `TODO.md` Phase 0 and

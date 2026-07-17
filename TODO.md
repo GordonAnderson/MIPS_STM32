@@ -44,6 +44,12 @@ Run CubeMX and generate into `cubemx/`. Use
 - [ ] Prove host comms: `GVER`, `GCMDS`, a get/set command, ACK/NAK.
 - [ ] Add the `debug` module; provide a project `GHal` (lib/, to write) for its
       pin/analog commands + `readInternalTempRaw()` for `CPUTEMP`.
+- [ ] **Build the fresh cooperative scheduler** (see CLAUDE_HANDOFF.md "Cooperative
+      scheduler — SETTLED DESIGN"). Task metadata incl. last/max runtime + run
+      count + overrun flag; scheduler owns SUSPEND; registers its own GAACE
+      command table (TASKS/TASK/TASKENA/TASKINT/RUNNOW/RESTART/SUSPEND). This is
+      the first example of a module owning its command table. Lives in lib/
+      (e.g. lib/scheduler/).
 
 ## Phase 2 — Bus transaction layer
 
