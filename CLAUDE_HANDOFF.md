@@ -16,8 +16,10 @@ PlatformIO Git GUI. Original firmware: `github.com/GordonAnderson/MIPS`
 
 ## Decisions already locked (do not relitigate without reason)
 
-1. **MCU:** STM32H743ZIT6 (144-pin) for the final board; WeAct MiniSTM32H743VITX
-   (100-pin VIT6) as the bring-up board. Rev V silicon (480 MHz/VOS0).
+1. **MCU:** STM32H743ZIT6 (144-pin). The WeAct 100-pin bring-up board was
+   DROPPED — the pin budget does not fit 100 pins, and it was an unnecessary
+   second step. Rev V silicon, VOS0, **440 MHz** (not 480 — CubeMX enforces a
+   derated AXI ceiling ~225 MHz; HCLK 220, timer clocks 220).
 2. **No preemptive RTOS.** Bare-metal + cooperative scheduler + PendSV
    DeferredQueue. The queue uses PendSV; a preemptive RTOS would claim it — they
    are mutually exclusive, which is *the* concrete reason for bare-metal.
@@ -183,11 +185,106 @@ abstract base in a vacuum — you'll guess wrong about what belongs in it. Seque
 4. That validated base + DCbias become the template modules 6–41 follow.
 This is the real reason DCbias-as-template (Phase 5) is the linchpin.
 
+## Read these first
+
+| Doc | What it is |
+|---|---|
+| `docs/MIPS_Rev6_PinMap.md` | **AUTHORITATIVE** as-built pin/clock/EXTI map, verified against the .ioc (88 pins) |
+| `docs/Hardware_Design_Checklist.md` | Everything affecting the Rev 6.0 schematic |
+| `docs/MIPS_Bus_Signal_Map.md` | EXT1/EXT2 connectors, `BIO1`-`BIO7` generic signals |
+| `docs/CubeMX_Regeneration_Notes.md` | Punch list + what to check after every regeneration |
+| `docs/DIO_Port_Review_and_Plan.md` | DIO review, revised phase plan |
+
+The three `.docx` files are **stale** — see `MIPS_Rev6_PinMap.md` §6 for the list
+of what they get wrong (FreeRTOS, 480 MHz, LDAC on CH1/PA0, narrow-pulse LDAC,
+TIM3 as a clock output, I2C2 on PB10/PB11).
+
+## Current state
+
+**Phase 0 complete. Phase 1 in progress. Hardware design is the active work.**
+
+- CubeMX generated (Makefile toolchain, per-peripheral .c/.h), 88 pins verified.
+- GAACE_Core `stm32` branch builds in pure Cube. Needed `#if defined(ARDUINO)`
+  guards on `Devices`, `WireHelper`, `SerialBuffer`, `WireServer` — pushed.
+- Application entry point: **`lib/app/app.cpp`** with `appSetup()`/`appLoop()`
+  called from `main.c` USER CODE blocks. All application code is C++ under
+  `lib/`, so CubeMX regeneration never touches it.
+- **Cooperative scheduler written** — `lib/scheduler/taskScheduler.{h,cpp}`.
+
+> ⚠ **NOTHING HAS RUN ON HARDWARE.** The Rev 6.0 board does not exist yet and the
+> WeAct bring-up board was dropped. Everything is **compile-verified only**.
+> Treat all firmware as unproven until the board arrives.
+
+Two known loose ends:
+- `GUartStream(&huart3)` — the constructor signature was assumed, not verified
+  against `lib/transports/GUartStream.h`.
+- The `DeferredQueue_PendSV()` call in `stm32h7xx_it.c` is declared but the
+  library still defines `PendSV_Handler`. Rename it in `bus_queue` at Phase 2
+  (see `CubeMX_Regeneration_Notes.md` §2.1) — that removes the recurring
+  post-regeneration edit permanently.
+
 ## Immediate next action
 
-**Run CubeMX**, generate into `cubemx/`, following `TODO.md` Phase 0 and
-`docs/MIPS_Rev6_PinPlanning_Worksheet.docx`. The project is set up to build out
-of `cubemx/Core/Src` (see `platformio.ini`). Nothing builds until CubeMX runs.
+Finish the Rev 6.0 hardware design — `docs/Hardware_Design_Checklist.md` §8
+lists the open items. Three need Gordon specifically: the IC11 gate/pulse
+circuit intent (§2.2.6), the 3.3 V power architecture (§11.2.2), and whether the
+Q-X inputs get an RC deglitch (the STM32 has **no** per-pin glitch filter, unlike
+the SAM3X, so this is hardware-only and cannot be fixed in firmware later).
+
+Then Phase 1 hardware bring-up, then **DIO first** (not DCbias) per the revised
+plan in `docs/DIO_Port_Review_and_Plan.md`.
+
+## Decisions made during the CubeMX session (do not relitigate)
+
+- **440 MHz core**, not 480 — derated AXI/AHB ceiling. TIM1/TIM2 kernel clock is
+  **220 MHz**; pass 220000000 into `STM32PulseTimer::begin()`.
+- **LDAC is a TOGGLE, not a shaped pulse.** The board has an edge detector that
+  fires a pulse on every edge. LDAC is **TIM2_CH3 on PA2** — not CH1, because on
+  TIM2 CH1 and ETR are the same silicon resource and ETR is needed for R.
+  CubeMX generates CH3 in *frozen* mode deliberately; the LL driver sets
+  toggle + preload-off in begin(). PA2 must also be runtime-switchable to plain
+  GPIO output.
+- **Q and R are TIM2 signals**: Q = external clock (PB3, CH2), R = external
+  trigger (PA0, ETR, slave reset). They are NOT the same nets as EXT1 pins 7/8.
+- **EXT1 pins 5,6,7,8,13,14 + EXT2 pin 14 are now generic `BIO1`–`BIO7`** —
+  runtime configurable as input, output or interrupt.
+- **EXTI is the tight resource.** 16 lines total, 15 needed (IN_Q–IN_X + BIO1-7),
+  all on distinct pin numbers. Lines 5–9 and 10–15 share NVIC vectors → ONE
+  line-indexed dispatch table. EXTI configured in firmware, not CubeMX.
+- **Encoder uses TIM3 hardware quadrature decode** (PB4/PB5) — no EXTI, no missed
+  counts. ENC_SW (PD1) is polled. This is what makes 15 signals fit in 16 lines.
+- **TIM2 is the only LL peripheral**; everything else is HAL.
+- Digital outputs A–P are **74HC595 bit positions, not STM32 pins**.
+- **The DO 595s are latched by LDAC**, not separate RCK lines. This puts digital
+  outputs under the pulse sequence generator. Consequence: EVERY LDAC edge
+  latches the shift registers, including DAC-only edges, so the 595 contents
+  must always be valid and the SPIQueue must order the shift BEFORE any
+  pulse-engine LDAC edge. This is a real race, not a theoretical one.
+- `LDAC_CTRL` (PA3) overrides the on-board edge detector for software-generated
+  LDAC — carried over from Rev 5.4's `LDACcapture`/`LDACrelease`.
+- **`TRG_OUT` (PC6/TIM8_CH1) and the burst generator are the same net.** Both
+  trigger outputs are **inverted in hardware**; host software depends on it.
+- **RTC on LSE** with VBAT battery backup — gives timestamps plus 32 retained
+  backup registers.
+- **DIO is the first module**, not DCbias. But DIO is not a typical module (no
+  board address, no EEPROM, no detection), so keep the `Module` base class
+  PROVISIONAL until DCbias lands.
+
+## Scheduler — built, untested
+
+`lib/scheduler/taskScheduler.{h,cpp}`, in GAACE_Core house style (class +
+module-level statics + `CommandList`, matching `debug`).
+
+- Runtime in **microseconds** via DWT, not ms — task bodies mostly run under 1 ms.
+- Commands: `TASKS`, `TASK`, `TASKENA`, `TASKINT`, `RUNNOW`, `RESTART`,
+  `SUSPEND`, `TASKCLR`, plus **Rev 5.4 aliases** (`THREADS`, `THREAD`,
+  `STHRDENA`, `STHRDINT`, `THRDRESTART`, `SSPND`) for host compatibility —
+  a clearly marked block that can be deleted.
+- Resume-from-suspend and re-enable both **re-arm** the task, or everything
+  bunches onto one `run()` call.
+- Tick comparison is **wrap-safe** — survives the ~49-day `HAL_GetTick()` rollover.
+- ⚠ **The pulse/table engine must query `isSuspended()` itself** — it runs from
+  TIM2, not from `run()`, so SUSPEND will not stop it otherwise.
 
 ## Key hardware facts (from reverse-engineering Rev 5.4)
 
