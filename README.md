@@ -1,9 +1,6 @@
 # MIPS_STM32
 
-Firmware for the **MIPS Rev 6.0 controller** — the migration of GAA Custom
-Electronics' MIPS mass-spectrometry / ion-processing controller from the
-Arduino Due (Atmel SAM3X8E, Cortex-M3, 84 MHz) to the **STM32H743**
-(Cortex-M7, running at 440 MHz), built on **native STM32Cube (HAL/LL)** — not Arduino.
+Firmware for the **MIPS Rev 6.0 controller** — representing the migration of GAA Custom Electronics' MIPS modular intelligent power sources from the Arduino Due (Atmel SAM3X8E, Cortex-M3, 84 MHz) to the **STM32H743** (Cortex-M7, running at 440 MHz). Built on **native STM32Cube (HAL/LL)**, not Arduino.
 
 ## Status
 
