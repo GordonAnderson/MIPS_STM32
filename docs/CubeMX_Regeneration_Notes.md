@@ -82,7 +82,26 @@ device must not present its D+ pull-up when VBUS is absent.
 Boot output levels matter here: both trigger outputs are **inverted in
 hardware**, so set the GPIO Output Level so the lines idle *inactive* at reset.
 
-### 1.5 Still to decide — not yet actionable
+### 1.5 Power-related pins
+
+| Change | Pin | Setting |
+|---|---|---|
+| `PA9` → **plain GPIO_Input** | PA9 | was `USB_OTG_FS_VBUS`. Label `VBUS_SENSE`. Set USB `vbus_sensing_enable = DISABLE` and drive the D+ pull-up in firmware. **5 V must not reach PA9 directly** — see checklist §2.3.1 |
+| Add `PWR_SRC` | **PF3** | GPIO_Input — TPS2116 `ST` pin, low when running from USB. External 10 kΩ pull-up |
+
+### 1.6 ADC reference — VREFBUF must be disabled
+
+VREF+ is driven by an **external REF3033 3.0 V reference**. The H743's internal
+**VREFBUF must be disabled** or it will fight the external part.
+
+Check in CubeMX under the ADC / VREFBUF settings that no internal reference
+buffer is enabled. Symptom if missed: wrong and drifting ADC readings that do
+not obviously point at the reference.
+
+ADC full scale is therefore **3.0 V**, which firmware must use in all ADC
+scaling maths — including `VIN_SENSE` (`Vin = Vadc × 4.9`, 39k/10k divider).
+
+### 1.7 Still to decide — not yet actionable
 
 - **USB-only inhibit control.** What must firmware hold off when running on USB
   power alone (HV, analog, module bus power)? If a hardware inhibit line is
@@ -95,7 +114,7 @@ hardware**, so set the GPIO Output Level so the lines idle *inactive* at reset.
   never back-feed the 12 V rail.** Rev 5.4's D2/D3/USBVCC circuit is the
   starting point.
 
-### 1.6 Interrupts — current state and policy
+### 1.8 Interrupts — current state and policy
 
 **Nothing but core exceptions and SysTick is enabled.** No TIM, USART, I2C, SPI
 or USB interrupts. That is deliberate; enable per phase:

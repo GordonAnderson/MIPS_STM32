@@ -19,9 +19,13 @@ history. Pin assignments: `MIPS_Rev6_PinMap.md` (authoritative).
 | LSE | **32.768 kHz crystal** → PC14 / PC15 (RTC) |
 | Debug | SWD only — PA13 (SWDIO), PA14 (SWCLK) |
 
-Standard H7 decoupling: one 100 nF per VDD pin, bulk on each rail, and the
-VCAP capacitors per the datasheet. VDDA / VREF+ filtered separately from
-digital VDD — five ADC inputs depend on it.
+Power pin connections, rail allocation and decoupling: **`Power_Supply_Design.md`
+§3.5–3.6.** Summary: all VDD on `+3V3_MCU` with 100 nF per pin; VDDA and
+VDD33USB via ferrite beads from the same rail (**never a separate regulator**);
+VCAP capacitors ~2.2 µF X7R hard against the pins; single solid ground plane,
+not split.
+
+Reference: **ST AN4938** — the hardware design guide for this MCU family.
 
 ---
 
@@ -34,9 +38,23 @@ Two 5 V sources that must never fight:
 - **USB VBUS** (bus-powered operation)
 - **12 V input → buck → 5 V** (self-powered operation)
 
-**Use a P-FET power mux or ideal-diode controller**, not plain Schottkys — the
-forward drop and the reverse-feed path both matter here. Rev 5.4's D2/D3/USBVCC
-circuit is the starting point.
+**Full power train definition: `Power_Supply_Design.md`.**
+
+| Stage | Part |
+|---|---|
+| 12 V → 5 V | **Recom R-78E5.0-1.0** module (SIP-3, 7805 pinout, 1 A) |
+| Source select | **TPS2116DRLR** power mux — VIN1 = 12 V-derived (**priority**), VIN2 = USB VBUS |
+| 3.3 V ×2 | **AP2114H-3.3TRG1** (SOT-223) → `+3V3_MCU`, `+3V3_PERIPH` |
+
+The TPS2116 replaces a diode-OR and does three jobs at once: explicit source
+**priority** (12 V always wins when present), **reverse-current blocking** —
+which enforces "USB 5 V must never back-feed the 12 V rail" in silicon — and its
+**ST pin** is a free power-source indicator to a GPIO (**PF3**).
+
+Still watch **LDO dropout.** The mux costs only ~26 mV (vs ~350 mV for a
+Schottky), leaving ~1.12 V at worst case — but common 1.1–1.2 V dropout parts
+(AMS1117, LD1117, NCP1117, TLV1117) still have no margin, and they fail *only*
+on USB power, so the board works on the bench and dies on a laptop.
 
 > **Hard rule: USB 5 V must never back-feed the 12 V rail.**
 
@@ -48,13 +66,35 @@ never powered from USB**.
 | Item | Value |
 |---|---|
 | Max input | **12 V**, zener clamped |
-| Divider | **30 kΩ / 10 kΩ** → 3.0 V at 12 V in |
-| Thévenin | 7.5 kΩ — fine for H7 sampling |
+| Divider | **39 kΩ / 10 kΩ** → 2.449 V at 12 V in |
+| Thévenin | 8.0 kΩ — fine for H7 sampling |
+| Scale factor | firmware: `Vin = Vadc × 4.9` |
 | Filter | **100 nF** at the ADC node |
 | Goes to | **PF11** (`VIN_SENSE`, ADC1_INP2) |
 
 Restores a Rev 5.4 feature (R6/R7 → AD8). Combined with VBUS sense it resolves
 all four power states — see `CubeMX_Regeneration_Notes.md` §1.3.
+
+Scaled for a **3.0 V ADC full scale** (see §2.6), landing at 81.6% FS with
+headroom. Do not use the earlier 30k/10k — that gave exactly 3.0 V, i.e. full
+scale with no margin.
+
+### 2.6 ⚠ ADC reference is 3.0 V, not 3.3 V
+
+VREF+ is driven by a **dedicated REF3033 3.0 V series reference**, not tied to
+VDDA — ADC accuracy is then ~0.1% rather than the LDO's ~±2%.
+
+**Consequences that affect the schematic:**
+
+- **ADC full scale is 3.0 V.** The four ADC-connector inputs (PC0, PC1, PC4,
+  PC5) clip at 3.0 V. Any input conditioning carried over from Rev 5.4 must be
+  checked against 3.0 V, not 3.3 V.
+- `VIN_SENSE` divider is 39k/10k (§2.2), scaled for this.
+- **VREFBUF must be disabled in firmware** — the H743's internal reference
+  buffer would otherwise fight the external reference. CubeMX setting, easy to
+  miss, and the symptom (wrong/drifting ADC readings) does not point at it.
+
+Full detail: `Power_Supply_Design.md` §3.6.
 
 ### 2.3 USB-C
 
@@ -62,8 +102,41 @@ all four power states — see `CubeMX_Regeneration_Notes.md` §1.3.
 |---|---|
 | CC1, CC2 | **5.1 kΩ pull-down each** to GND (identifies as sink — without these a USB-C host never enables VBUS) |
 | Data | D+ → **A6 and B6**; D− → **A7 and B7** (reversible cable, USB 2.0 only, no mux needed) |
-| VBUS sense | → **PA9** (required: a self-powered device must not present its D+ pull-up when VBUS is absent) |
+| VBUS sense | → **PA9 via a divider** — see §2.3.1. **Do NOT connect 5 V directly.** |
 | Current | Plain Rd = 500 mA default. **Verify the USB-only current budget** — more needs CC sensing or a PD controller |
+
+### 2.3.1 ⚠ VBUS sense — divider is MANDATORY
+
+**Do not connect VBUS directly to PA9.** PA9 is 5 V tolerant, but the absolute
+maximum rating for a 5 V-tolerant pin is **VDD + 4 V**. With the board unpowered
+(VDD = 0) that ceiling is 4 V, and 5 V on the pin violates AMR — ST states this
+can cause permanent damage. This board is self-powered from 12 V and can sit
+unpowered with USB still plugged in, so the condition WILL occur in normal use.
+
+A second problem rules out the obvious workaround: the **native** VBUS detector
+threshold is 4.25 V, but any divider low enough to be safe at VDD = 0 sits below
+that threshold. You cannot satisfy both.
+
+**Solution — divider into a plain GPIO, native VBUS sensing disabled:**
+
+| Item | Value |
+|---|---|
+| R1 (VBUS → pin) | **100 kΩ** |
+| R2 (pin → GND) | **200 kΩ** |
+| Pin voltage at 5 V VBUS | ~3.33 V — under the 4 V AMR |
+| Injection current at VDD = 0 | ~15 µA — far below the ±5 mA limit |
+| Filter | 100 nF at the pin |
+
+**CubeMX:** PA9 becomes plain `GPIO_Input` labelled `VBUS_SENSE`, **not**
+`USB_OTG_FS_VBUS`. Poll it (plug events are slow — the 100 ms UI task is fine).
+No EXTI: PA9 would be EXTI9, already owned by `IN_T` on PG9.
+
+**Firmware:** set `vbus_sensing_enable = DISABLE` and drive the D+ pull-up with
+`HAL_PCD_DevConnect()` / `DevDisconnect()` from the GPIO state. Required anyway
+for a self-powered device — it must not present its pull-up without VBUS.
+
+Reference: ST **AN4879**, "Introduction to USB hardware and PCB guidelines using
+STM32 MCUs".
 
 ### 2.4 RTC battery backup
 
@@ -78,7 +151,16 @@ Provides battery-retained calendar plus 32 backup registers.
 
 ### 2.5 Open
 
-- **3.3 V power architecture** (design spec §11.2.2) — still unresolved.
+- **3.3 V power architecture** — now defined in `Power_Supply_Design.md`.
+- ⚠ **Estimated load (~650 mA) may exceed the 500 mA USB default** — but the
+  estimate is conservative; realistic steady state is likely 350–450 mA.
+  **Measure at bring-up.** If over, mitigate in firmware (dim/blank backlight,
+  defer SD access in USB-only mode).
+- ❌ **The internal SMPS is NOT available** on the LQFP144 package (no VLXSMPS /
+  VDDSMPS pins — the VCAP pins confirm LDO-only). `PWR_LDO_SUPPLY` is the only
+  option. See `Power_Supply_Design.md` §2.1.
+- ⚠ **VCAP capacitors are mandatory** — ~2.2 µF X7R on each of the two VCAP
+  pins, placed hard against the package. The core LDO is unstable without them.
 - **USB-only inhibit:** what must be held off when running without 12 V (HV,
   analog, module bus power)? If a hardware inhibit line is needed it is another
   GPIO to allocate — decide before layout.
@@ -228,6 +310,8 @@ prescaler. No hardware implication beyond normal QSPI layout care.
 
 ## 8. Open items blocking final schematic
 
+0. **External ADC input conditioning** — verify the Rev 5.4 ADC-connector input
+   scaling suits a **3.0 V** full scale (§2.6).
 1. **IC11 gate/pulse circuit intent** (design spec §2.2.6) — never resolved.
    The analog setpoint is now the on-chip **DAC on PA4**; confirm what remains
    of the original LMV358 + FDN340P circuit.
