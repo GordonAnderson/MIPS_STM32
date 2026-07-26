@@ -2,11 +2,11 @@
 
 **Verified against the generated CubeMX project** (`cubemx.ioc`). This file is
 the authoritative pin reference — it reflects what was actually generated, not
-what was planned. Where it disagrees with `MIPS_Rev6_PinPlanning_Worksheet.docx`
-or `MIPS_STM32H7_Design_Spec.docx`, this file wins (see §6).
+what was planned. It supersedes the earlier `.docx` planning documents (now
+removed from the repo); their still-relevant corrections are listed in §6.
 
 - MCU: **STM32H743ZIT6**, LQFP-144
-- Pins assigned: **88** of ~114 available I/O
+- Pins assigned: **89** of ~114 available I/O (incl. SWD, HSE, LSE)
 - Core 440 MHz / HCLK 220 MHz / APB timer clocks 220 MHz / USB 48.000 MHz
 - Verified: RTC on LSE, TIM2 on LL (all other peripherals HAL), no FreeRTOS
 
@@ -33,7 +33,7 @@ the nominal 240. DIVN1 = 176 puts HCLK at 220, under the cap, and still clears
 every requirement: TIM1 at 220 MHz gives 4400 counts at 50 kHz (true 12-bit),
 and TIM2 at 220 MHz is the kernel clock passed to `STM32PulseTimer::begin()`.
 
-**HAL time base is SysTick** (no RTOS). TIM6 is free and unassigned.
+**HAL time base is SysTick** (no RTOS). TIM6 / TIM13 / TIM14 / TIM17 are free.
 
 ---
 
@@ -45,13 +45,13 @@ and TIM2 at 220 MHz is the kernel clock passed to `STM32PulseTimer::begin()`.
 |---|---|---|---|---|
 | PA0 | TIM2_ETR | TriggerSource_ETR | `IN_R` | J6 input R — TIM2 external trigger (slave reset) |
 | PA1 | TIM5_CH2 | Output Compare2 CH2 |  | Continuous clock output |
-| PA2 | TIM2_CH3 | Output Compare3 CH3 |  | LDAC toggle — latches DACs **and DO shift registers** |
+| PA2 | TIM2_CH3 | Output Compare3 CH3 | `LDAC_TOGGLE` | Drives the on-board edge detector, which generates LDAC (latches DACs **and DO shift registers**) |
 | PA3 | GPIO | Output | `LDAC_CTRL` | Overrides LDAC edge detector — software LDAC |
 | PA4 | DAC1_OUT1 | DAC_OUT1 |  | Gate / setpoint analog out (§2.2.6) |
 | PA5 | SPI1_SCK |  |  | SPI1 clock — TFT / SD |
 | PA6 | SPI1_MISO |  |  | SPI1 MISO — TFT / SD |
 | PA7 | SPI1_MOSI |  |  | SPI1 MOSI — TFT / SD |
-| PA9 | USB_OTG_FS_VBUS |  |  | USB VBUS sense — required for self-powered device |
+| PA9 | GPIO | Input | `VBUS_SENSE` | USB VBUS present-detect via 100k/200k divider. **Native VBUS sensing disabled**; firmware drives the D+ pull-up (`HAL_PCD_DevConnect/DevDisconnect`). See `Hardware_Design_Checklist §2.3.1` |
 | PA11 | USB_OTG_FS_DM |  |  | USB D− |
 | PA12 | USB_OTG_FS_DP |  |  | USB D+ |
 | PA13 | JTMS-SWDIO |  |  | SWDIO |
@@ -61,6 +61,7 @@ and TIM2 at 220 MHz is the kernel clock passed to `STM32PulseTimer::begin()`.
 
 | Pin | Peripheral | Mode | Label | Function |
 |---|---|---|---|---|
+| PB1 | GPIO | Input | `AUX1_IO` | Aux digital I/O — on EXTI line 1 (the last free line), so promotable to interrupt like a BIO pin |
 | PB2 | QUADSPI_CLK |  |  | QSPI clock — config flash |
 | PB3 | TIM2_CH2 | Input_Capture2_from_TI2 | `IN_Q` | J6 input Q — TIM2 external clock |
 | PB4 | TIM3_CH1 | Encoder_Interface |  | Encoder A — hardware quadrature |
@@ -137,20 +138,20 @@ and TIM2 at 220 MHz is the kernel clock passed to `STM32PulseTimer::begin()`.
 | PF0 | I2C2_SDA |  |  | I2C2 SDA — EXT1 pin 10 |
 | PF1 | I2C2_SCL |  |  | I2C2 SCL — EXT1 pin 9 |
 | PF2 | GPIO | Input | `BIO5` | Generic bus I/O — EXT1 pin 13 |
-| PF11 | ADC1_INP2 |  | `VIN_SENSE` | **12 V supply monitor** — 30k/10k divider, 100nF |
+| PF3 | GPIO | Input | `PWR_SRC` | TPS2116 `ST` — power-source indicator (low = running from USB). External 10k pull-up |
+| PF6 | TIM16_CH1 | PWM Generation1 CH1 | `TFT_BR` | TFT backlight brightness PWM |
+| PF11 | ADC1_INP2 | IN2-Single-Ended | `VIN_SENSE` | **12 V supply monitor** — 39k/10k divider, 100nF (`Vin = Vadc × 4.9`, 3.0 V FS) |
 
 ### Port G
 
 | Pin | Peripheral | Mode | Label | Function |
 |---|---|---|---|---|
-| PG0 | GPIO | Output | `RCK_DO_AH` | 595 latch A–H — **see §7, LDAC also latches** |
-| PG1 | GPIO | Output | `RCK_DO_IP` | 595 latch I–P — **see §7, LDAC also latches** |
 | PG2 | GPIO | Output | `ADDR0` | Board address 0 — EXT2 pin 3 |
 | PG3 | GPIO | Output | `ADDR1` | Board address 1 — EXT2 pin 4 |
 | PG4 | GPIO | Output | `ADDR2` | Board address 2 — EXT2 pin 5 |
-| PG5 | GPIO | Output | `OE_DO_AH` | Buffer OE — outputs A–H |
-| PG6 | GPIO | Output | `OE_DO_IP` | Buffer OE — outputs I–P |
-| PG7 | GPIO | Output | `OE_DI` | Buffer OE — inputs Q–X |
+| PG5 | GPIO | Output | `OE_DO_AP` | Single output-enable for **all** DO A–P level shifters |
+| PG6 | GPIO | Output | `DOSR_CLR` | 595 shift-register clear (~SRCLR). Idle **high** (inactive) at reset |
+| PG7 | GPIO | Output | `RCK_DO_IP` | 595 latch source — **jumper-selectable (JP2) vs LDAC**. Latch = LDAC by default, so this is **populated but unused** in the normal DO path |
 | PG8 | GPIO | Input | `IN_S` | J6 input S |
 | PG9 | GPIO | Input | `IN_T` | J6 input T |
 | PG10 | GPIO | Input | `IN_U` | J6 input U |
@@ -180,14 +181,15 @@ and TIM2 at 220 MHz is the kernel clock passed to `STM32PulseTimer::begin()`.
 | TIM5 (32-bit) | HAL | Continuous clock output |
 | TIM7 | HAL | Delay generator (no pins) — also times `AUX_TRGOUT` pulses |
 | TIM8 | HAL | `TRG_OUT` — burst of N cycles via repetition counter |
-| TIM6 | — | **unused / free** |
+| TIM16 | HAL | `TFT_BR` — TFT backlight brightness PWM (CH1 on PF6) |
+| TIM6 / TIM13 / TIM14 / TIM17 | — | **unused / free** |
 | SPI1 | HAL | TFT display + SD card |
 | SPI2 | HAL | Module bus — 74HC595 chain + EXT2 (full duplex, MISO required) |
 | I2C1 | HAL | Module bus TWI |
 | I2C2 | HAL | EXT1 TWI (pins 9/10) |
-| QUADSPI | HAL | Config flash (W25Q80DV) — GAACE FlashFS |
+| QUADSPI | HAL | Config flash (W25Q32JVSS on the schematic) — GAACE FlashFS |
 | USART3 | HAL | Console (GAACE command processor) |
-| USART1 | HAL | UART1 — EXT1 pins 11/12 |
+| USART1 | HAL | Spare UART on PB6/PB7 — enabled but no bus destination (header or drop; see §4a and `Hardware_Design_Checklist §8`) |
 | UART4 | HAL | AUX2 — external RS-232-to-Ethernet module |
 | UART5 | HAL | UART3 |
 | USB_OTG_FS | HAL | Device — CDC + MSC composite (Phase 3) |
@@ -210,7 +212,7 @@ of these without re-checking this table.**
 | Line | Signal | Pin | NVIC vector |
 |---|---|---|---|
 | 0 | `IN_R` | PA0 | EXTI0 (individual) |
-| 1 | *spare* | — | EXTI1 (individual) |
+| 1 | `AUX1_IO` | PB1 | EXTI1 (individual) — last free line |
 | 2 | `BIO5` | PF2 | EXTI2 (individual) |
 | 3 | `IN_Q` | PB3 | EXTI3 (individual) |
 | 4 | `BIO1` | PD4 | EXTI4 (individual) |
@@ -263,9 +265,11 @@ EXT1 pins 11/12 are `TXD0`/`RXD0`, the **console** — USART3 on PD8/PD9.
 
 Unassigned and available on the 144-pin package:
 
-PA3, PA8, PA9, PA10, PA15, PB0, PB1, PB11, PC2, PC3, PC7, PC8, PC9, PC13,
-PA8, PA10, PA15, PB0, PB1, PB11, PC2, PC3, PC7, PC8, PC9, PC13, PD0, PD3,
-PF3–PF10, PF12–PF15, plus **TIM6** as a free timer.
+PA8, PA10, PA15, PB0, PB11, PC2, PC3, PC7, PC8, PC9, PC13, PD0, PD3,
+PF4, PF5, PF7–PF10, PF12–PF15, plus **TIM6 / TIM13 / TIM14 / TIM17** as free timers.
+
+(PA3 = `LDAC_CTRL`, PA9 = `VBUS_SENSE`, PB1 = `AUX1_IO`, PF3 = `PWR_SRC`,
+PF6 = `TFT_BR` — no longer spare.)
 
 Notes:
 - **PC2_C / PC3_C** are direct-analog pins with a lower-impedance path to ADC3 —
@@ -334,11 +338,11 @@ set a **/2 or /4 prescaler** in Phase 3.
 
 **The DO 595 shift registers are latched by LDAC**, not by separate RCK lines.
 
-> **As-built note:** PG0/PG1 still carry the `RCK_DO_AH` / `RCK_DO_IP` labels in
-> the current CubeMX project. They are harmless GPIO outputs, but confirm the
-> intent: either **delete them** (LDAC does the latching, freeing two pins), or
-> **keep them deliberately** — e.g. to give the board a jumper-selectable
-> latch source (RCK *or* LDAC) as a hardware hedge.
+> **As-built (resolved):** the DO latch is **LDAC**. PG0/PG1 are gone. A single
+> `RCK_DO_IP` (PG7) remains as a **jumper-selectable (JP2)** alternate latch
+> source, but the jumper defaults to LDAC and is not used — so PG7 is populated
+> but idle in the normal DO path. `DOSR_CLR` (PG6) clears the chain; `OE_DO_AP`
+> (PG5) is the single output-enable for all of A–P.
 
 **Why:** it puts the 16 digital outputs under the pulse sequence generator. DO
 bits can change synchronously with DAC updates, at hardware timing precision —

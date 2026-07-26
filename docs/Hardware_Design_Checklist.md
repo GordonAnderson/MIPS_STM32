@@ -4,7 +4,8 @@ Everything decided during the firmware/CubeMX work that affects the schematic.
 Consolidated so schematic capture does not have to re-read the whole design
 history. Pin assignments: `MIPS_Rev6_PinMap.md` (authoritative).
 
-✅ **Pin map verified against the current `.ioc`** — 88 pins, RTC on LSE, TIM2 on LL.
+✅ **Pin map verified against the current `.ioc`** — 89 pins, RTC on LSE, TIM2 on LL,
+5 ADC ranks, PA9 = `VBUS_SENSE` GPIO, DO control = `OE_DO_AP`/`DOSR_CLR`/`RCK_DO_IP`.
 
 ---
 
@@ -177,21 +178,21 @@ Provides battery-retained calendar plus 32 backup registers.
 > outputs under the pulse sequence generator — DO bits change synchronously
 > with DAC updates at hardware timing precision.
 
-**Decide before layout:** PG0/PG1 are still assigned as `RCK_DO_AH`/`RCK_DO_IP`
-in the current CubeMX project. Either drop them (LDAC latches; two pins freed)
-or keep them deliberately as a **jumper-selectable latch source** — RCK or LDAC.
-The second is a reasonable hedge on a first-spin board, since it costs two pins
-that are otherwise spare and de-risks the LDAC-latch assumption.
+**Resolved:** latch = **LDAC**. PG0/PG1 are dropped. A single `RCK_DO_IP` (PG7)
+remains as a **jumper-selectable (JP2)** alternate latch source; the jumper
+defaults to LDAC and is not populated for use, so PG7 is a populated-but-idle
+GPIO — the hedge is on the board but off in normal operation.
 
 Firmware consequence (noted here because it constrains the hardware intent):
 every LDAC edge latches the shift registers, including DAC-only edges, so the
-595 contents must be valid at all times.
+595 contents must be valid at all times, and the SPI2 shift must complete before
+any pulse-engine LDAC edge.
 
 ### 3.2 LDAC and its edge detector
 
 | Signal | Pin | Role |
 |---|---|---|
-| `LDAC` | **PA2** (TIM2_CH3) | Toggles; on-board edge detector emits a pulse **on every edge** |
+| `LDAC_TOGGLE` | **PA2** (TIM2_CH3) | CPU toggles this; the on-board edge detector emits the `LDAC` pulse **on every edge** |
 | `LDAC_CTRL` | **PA3** | Overrides the edge detector so firmware can drive LDAC directly |
 
 `LDAC_CTRL` carries over Rev 5.4's `LDACcapture` / `LDACrelease` (A11). PA2 also
@@ -205,9 +206,9 @@ PA2 and the edge-detector circuit.
 | `ADDR0-2` | PG2 / PG3 / PG4 | Board address → selects which board the CS applies to |
 | `SPI_CS` | PB12 | EXT2 pin 6 |
 | `BRDSEL` | PD10 | Board **bank** select 0/1 → 8 addresses × 2 banks = **16 boards** |
-| `OE_DO_AH` | PG5 | Buffer OE, outputs A–H |
-| `OE_DO_IP` | PG6 | Buffer OE, outputs I–P |
-| `OE_DI` | PG7 | Buffer OE, inputs Q–X |
+| `OE_DO_AP` | PG5 | **Single** output-enable for all DO A–P. There is **no** separate DI output-enable |
+| `DOSR_CLR` | PG6 | 595 shift-register clear (~SRCLR); idle high at reset |
+| `RCK_DO_IP` | PG7 | Jumper-selectable (JP2) alternate 595 latch — populated but unused (latch = LDAC) |
 
 ### 3.4 SPI2 is full duplex — MISO required
 
@@ -329,9 +330,10 @@ prescaler. No hardware implication beyond normal QSPI layout care.
 
 ## 9. Superseded documents
 
-`MIPS_STM32H7_Design_Spec.docx`, `MIPS_Rev6_PinPlanning_Worksheet.docx` and
-`MIPS_Rev6_Firmware_Plan.docx` predate most of the above. Known-stale items are
-listed in `MIPS_Rev6_PinMap.md` §6 — notably FreeRTOS, 480 MHz, LDAC on CH1/PA0,
-the narrow-pulse LDAC scheme, TIM3 as a clock output, and I2C2 on PB10/PB11.
+The earlier `MIPS_STM32H7_Design_Spec.docx`, `MIPS_Rev6_PinPlanning_Worksheet.docx`
+and `MIPS_Rev6_Firmware_Plan.docx` predated most of the above and have been
+**removed from the repo**. Their few still-relevant corrections are captured in
+`MIPS_Rev6_PinMap.md §6` — notably FreeRTOS, 480 MHz, LDAC on CH1/PA0, the
+narrow-pulse LDAC scheme, TIM3 as a clock output, and I2C2 on PB10/PB11.
 
-**Trust the markdown docs over the .docx files.**
+**The markdown docs are the source of truth.**

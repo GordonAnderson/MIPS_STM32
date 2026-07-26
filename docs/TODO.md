@@ -1,6 +1,6 @@
 # MIPS_STM32 — TODO / Next Steps
 
-Sequenced to match the phased plan in `docs/MIPS_Rev6_Firmware_Plan.docx`.
+This file is the authoritative, sequenced phase plan for the port.
 Each phase leaves a working system. Do them in order.
 
 ---

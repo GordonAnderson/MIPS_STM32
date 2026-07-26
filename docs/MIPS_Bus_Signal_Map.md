@@ -94,13 +94,16 @@ every port: PA4, PB4, PC4 and PD4 all drive EXTI4, and only one may be an active
 interrupt source at a time.
 
 The board needs **15 independently interrupt-capable signals** — Q–X (8) plus
-BIO1–BIO7 (7). That fits in 16 lines with one spare, but ONLY because every one
-of the 15 is assigned a distinct pin number. Any reassignment must preserve this.
+BIO1–BIO7 (7) — each on a distinct pin number so they land on distinct EXTI
+lines. `AUX1_IO` (PB1) now takes the 16th line (line 1), so the EXTI controller
+is **fully committed at 16/16**. Any reassignment must preserve the
+distinct-pin-number rule, and there is no longer a free line for a new
+interrupt-capable signal without sharing or displacing one.
 
 | Line | Signal | Pin | NVIC vector |
 |---|---|---|---|
 | 0 | R (TIM2_ETR) | PA0 | EXTI0 (individual) |
-| 1 | *spare* | — | EXTI1 (individual) |
+| 1 | `AUX1_IO` | PB1 | EXTI1 (individual) — last free line |
 | 2 | BIO5 | PF2 | EXTI2 (individual) |
 | 3 | Q (TIM2_CH2) | PB3 | EXTI3 (individual) |
 | 4 | BIO1 | PD4 | EXTI4 (individual) |
@@ -123,8 +126,8 @@ selection (rising / falling / both) and its own pending flag — the shared hand
 simply reads the pending register and dispatches. Build ONE dispatch table keyed
 by line number rather than per-module handlers.
 
-**Encoder consequence:** with 15 of 16 lines committed, the encoder cannot be
-interrupt-driven (one spare line won't cover A and B). Read it with **timer
+**Encoder consequence:** with all 16 lines committed, the encoder cannot be
+interrupt-driven (no free lines to cover A and B). Read it with **timer
 encoder mode or polling** — the better implementation for a UI knob anyway.
 
 ---

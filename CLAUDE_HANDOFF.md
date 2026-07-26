@@ -34,6 +34,14 @@ PlatformIO Git GUI. Original firmware: `github.com/GordonAnderson/MIPS`
    MSC. **USB:** composite CDC+MSC, HAL non-RTOS mode.
 7. **Cleanup scope = Tier 2:** build a clean core first, migrate the 41 modules
    onto it conservatively, cleaning each as it lands.
+8. **DO control scheme (settled during hardware reconciliation).** Digital
+   outputs latch on **LDAC** (CPU drives `LDAC_TOGGLE` on PA2 → on-board edge
+   detector → LDAC). A **single** `OE_DO_AP` (PG5) enables all DO A–P — there is
+   no DI output-enable. `DOSR_CLR` (PG6) clears the 595 chain. `RCK_DO_IP` (PG7)
+   is a jumper-selectable (JP2) alternate latch, defaulting to LDAC and left
+   unused — populated but idle. `AUX1_IO` = PB1 (EXTI line 1). Firmware
+   consequence: the SPI2 shift must complete before any pulse-engine LDAC edge,
+   and the 595 contents must be valid at all times.
 
 ## What's been built (and verified off-target)
 
@@ -189,21 +197,30 @@ This is the real reason DCbias-as-template (Phase 5) is the linchpin.
 
 | Doc | What it is |
 |---|---|
-| `docs/MIPS_Rev6_PinMap.md` | **AUTHORITATIVE** as-built pin/clock/EXTI map, verified against the .ioc (88 pins) |
-| `docs/Hardware_Design_Checklist.md` | Everything affecting the Rev 6.0 schematic |
+| `docs/MIPS_Rev6_PinMap.md` | **AUTHORITATIVE** as-built pin/clock/EXTI map, regenerated from the .ioc (89 pins) |
+| `docs/Hardware_Design_Checklist.md` | Everything affecting the Rev 6.0 schematic — **also the hardware bring-up companion** (power-on order, VCAP/VBAT/VREFBUF, USB current budget, ADC 3.0 V FS) |
 | `docs/MIPS_Bus_Signal_Map.md` | EXT1/EXT2 connectors, `BIO1`-`BIO7` generic signals |
-| `docs/CubeMX_Regeneration_Notes.md` | Punch list + what to check after every regeneration |
+| `docs/Power_Supply_Design.md` | Power train — buck / TPS2116 mux / AP2114H LDOs / REF3033 |
+| `docs/CubeMX_Regeneration_Notes.md` | The every-regeneration procedure |
+| `docs/Schematic_CubeMX_Reconciliation.md` | The punch list that closed out the hardware design (schematic ↔ CubeMX ↔ PinMap) |
 | `docs/DIO_Port_Review_and_Plan.md` | DIO review, revised phase plan |
 
-The three `.docx` files are **stale** — see `MIPS_Rev6_PinMap.md` §6 for the list
-of what they get wrong (FreeRTOS, 480 MHz, LDAC on CH1/PA0, narrow-pulse LDAC,
-TIM3 as a clock output, I2C2 on PB10/PB11).
+The earlier `.docx` planning files have been **removed** — see `MIPS_Rev6_PinMap.md` §6
+for the still-relevant corrections (they were wrong on FreeRTOS, 480 MHz, LDAC on
+CH1/PA0, narrow-pulse LDAC, TIM3 as a clock output, I2C2 on PB10/PB11).
 
 ## Current state
 
-**Phase 0 complete. Phase 1 in progress. Hardware design is the active work.**
+**Hardware design is closed out and reconciled. Next physical milestone: PCB
+layout → fab → assembly → initial hardware bring-up.** Firmware Phase 1 waits on
+real boards.
 
-- CubeMX generated (Makefile toolchain, per-peripheral .c/.h), 88 pins verified.
+- Schematic ↔ CubeMX `.ioc` ↔ `MIPS_Rev6_PinMap.md` are consistent. The `.ioc`
+  is verified (89 pins); the reconciliation is recorded in
+  `docs/Schematic_CubeMX_Reconciliation.md` and is burned down except two items
+  the layout/fab step carries: the KiCad **ERC pass** and physically placing the
+  **VBUS/PA9 divider** (100k/200k → PA9 as plain GPIO `VBUS_SENSE`).
+- CubeMX generated (Makefile toolchain, per-peripheral .c/.h).
 - GAACE_Core `stm32` branch builds in pure Cube. Needed `#if defined(ARDUINO)`
   guards on `Devices`, `WireHelper`, `SerialBuffer`, `WireServer` — pushed.
 - Application entry point: **`lib/app/app.cpp`** with `appSetup()`/`appLoop()`
@@ -211,11 +228,11 @@ TIM3 as a clock output, I2C2 on PB10/PB11).
   `lib/`, so CubeMX regeneration never touches it.
 - **Cooperative scheduler written** — `lib/scheduler/taskScheduler.{h,cpp}`.
 
-> ⚠ **NOTHING HAS RUN ON HARDWARE.** The Rev 6.0 board does not exist yet and the
-> WeAct bring-up board was dropped. Everything is **compile-verified only**.
-> Treat all firmware as unproven until the board arrives.
+> ⚠ **NOTHING HAS RUN ON HARDWARE.** The Rev 6.0 board does not exist yet — it is
+> in layout/fab. Everything is **compile-verified only**. Treat all firmware as
+> unproven until the board arrives and initial bring-up is done.
 
-Two known loose ends:
+Two known firmware loose ends (for after bring-up):
 - `GUartStream(&huart3)` — the constructor signature was assumed, not verified
   against `lib/transports/GUartStream.h`.
 - The `DeferredQueue_PendSV()` call in `stm32h7xx_it.c` is declared but the
@@ -225,14 +242,16 @@ Two known loose ends:
 
 ## Immediate next action
 
-Finish the Rev 6.0 hardware design — `docs/Hardware_Design_Checklist.md` §8
-lists the open items. Three need Gordon specifically: the IC11 gate/pulse
-circuit intent (§2.2.6), the 3.3 V power architecture (§11.2.2), and whether the
-Q-X inputs get an RC deglitch (the STM32 has **no** per-pin glitch filter, unlike
-the SAM3X, so this is hardware-only and cannot be fixed in firmware later).
+**PCB layout, then order/fab the boards, then initial hardware bring-up.** Nothing
+runs on silicon until real boards exist, so that is the gating milestone.
 
-Then Phase 1 hardware bring-up, then **DIO first** (not DCbias) per the revised
-plan in `docs/DIO_Port_Review_and_Plan.md`.
+During bring-up, `docs/Hardware_Design_Checklist.md` is the companion (power-on
+order, VCAP/VBAT/VREFBUF, measure the USB current budget, ADC 3.0 V full scale)
+and `docs/MIPS_Rev6_PinMap.md` is the pin authority. Firmware Phase 1 (console +
+scheduler, in `TODO.md`) is what bring-up first exercises.
+
+Then **DIO first** (not DCbias) per the revised plan in
+`docs/DIO_Port_Review_and_Plan.md`.
 
 ## Decisions made during the CubeMX session (do not relitigate)
 
