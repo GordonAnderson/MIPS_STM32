@@ -58,81 +58,15 @@ void MX_USB_OTG_FS_PCD_Init(void)
 
 }
 
-void HAL_PCD_MspInit(PCD_HandleTypeDef* pcdHandle)
-{
-
-  GPIO_InitTypeDef GPIO_InitStruct = {0};
-  RCC_PeriphCLKInitTypeDef PeriphClkInitStruct = {0};
-  if(pcdHandle->Instance==USB_OTG_FS)
-  {
-  /* USER CODE BEGIN USB_OTG_FS_PCD_MspInit 0 */
-
-  /* USER CODE END USB_OTG_FS_PCD_MspInit 0 */
-
-  /** Initializes the peripherals clock
-  */
-    PeriphClkInitStruct.PeriphClockSelection = RCC_PERIPHCLK_USB;
-    PeriphClkInitStruct.PLL3.PLL3M = 5;
-    PeriphClkInitStruct.PLL3.PLL3N = 96;
-    PeriphClkInitStruct.PLL3.PLL3P = 2;
-    PeriphClkInitStruct.PLL3.PLL3Q = 10;
-    PeriphClkInitStruct.PLL3.PLL3R = 2;
-    PeriphClkInitStruct.PLL3.PLL3RGE = RCC_PLL3VCIRANGE_2;
-    PeriphClkInitStruct.PLL3.PLL3FRACN = 0;
-    PeriphClkInitStruct.UsbClockSelection = RCC_USBCLKSOURCE_PLL3;
-    if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInitStruct) != HAL_OK)
-    {
-      Error_Handler();
-    }
-
-  /** Enable USB Voltage detector
-  */
-    HAL_PWREx_EnableUSBVoltageDetector();
-
-    __HAL_RCC_GPIOA_CLK_ENABLE();
-    /**USB_OTG_FS GPIO Configuration
-    PA11     ------> USB_OTG_FS_DM
-    PA12     ------> USB_OTG_FS_DP
-    */
-    GPIO_InitStruct.Pin = GPIO_PIN_11|GPIO_PIN_12;
-    GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
-    GPIO_InitStruct.Pull = GPIO_NOPULL;
-    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-    GPIO_InitStruct.Alternate = GPIO_AF10_OTG1_FS;
-    HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
-
-    /* USB_OTG_FS clock enable */
-    __HAL_RCC_USB_OTG_FS_CLK_ENABLE();
-  /* USER CODE BEGIN USB_OTG_FS_PCD_MspInit 1 */
-
-  /* USER CODE END USB_OTG_FS_PCD_MspInit 1 */
-  }
-}
-
-void HAL_PCD_MspDeInit(PCD_HandleTypeDef* pcdHandle)
-{
-
-  if(pcdHandle->Instance==USB_OTG_FS)
-  {
-  /* USER CODE BEGIN USB_OTG_FS_PCD_MspDeInit 0 */
-
-  /* USER CODE END USB_OTG_FS_PCD_MspDeInit 0 */
-    /* Peripheral clock disable */
-    __HAL_RCC_USB_OTG_FS_CLK_DISABLE();
-
-    /**USB_OTG_FS GPIO Configuration
-    PA11     ------> USB_OTG_FS_DM
-    PA12     ------> USB_OTG_FS_DP
-    */
-    HAL_GPIO_DeInit(GPIOA, GPIO_PIN_11|GPIO_PIN_12);
-
-  /* USER CODE BEGIN USB_OTG_FS_PCD_MspDeInit 1 */
-
-  /* USER CODE END USB_OTG_FS_PCD_MspDeInit 1 */
-  }
-}
-
 /* USER CODE BEGIN 1 */
+/* NOTE: HAL_PCD_MspInit()/HAL_PCD_MspDeInit() are intentionally NOT defined
+ * here. With the USB_DEVICE middleware enabled, CubeMX generates the real
+ * (and more complete - it also enables the OTG_FS NVIC IRQ) versions in
+ * USB_DEVICE/Target/usbd_conf.c. CubeMX has repeatedly regenerated a stale,
+ * incomplete duplicate pair in this file too, which is a multiple-definition
+ * link error. Re-delete them here if a future regeneration reintroduces them.
+ * See docs/CubeMX_Regeneration_Notes.md. */
+
 
 /* USER CODE END 1 */
 
